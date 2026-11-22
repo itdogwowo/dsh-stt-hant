@@ -18,7 +18,7 @@ import { selfRejection } from './lib/http-fence.js'
 import { createRemoteMicBridge, defaultCacheDir } from './lib/native-bridge.js'
 
 /** Host-half version; the panel compares it to its own bundle version. */
-export const HOST_VERSION = '0.10.3'
+export const HOST_VERSION = '0.11.2'
 
 /** The speech service must exist before this plugin activates. */
 export const inject = ['speechToText']

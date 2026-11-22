@@ -22,7 +22,7 @@ window.__ModuleLoader__.load({
     /** Sidebar entry id; doubles as the keyed `main` panel key. */
     const PANEL_ID = 'stt-hant'
     /** Shown in the panel footer so a stale client bundle is obvious. */
-    const PLUGIN_VERSION = '0.10.3'
+    const PLUGIN_VERSION = '0.11.2'
     /** Conversion variants the panel may switch between. */
     const CONVERT_VARIANTS = ['s2hk', 's2twp', 's2tw', 's2t']
     const KEY_NAMES = {
@@ -87,6 +87,17 @@ window.__ModuleLoader__.load({
       return true
     }
 
+    function setRemoteMicNotice(text) {
+      remoteMicRuntime.notice = text
+      notifyRemoteMicRuntime()
+      window.setTimeout(() => {
+        if (remoteMicRuntime.notice === text) {
+          remoteMicRuntime.notice = null
+          notifyRemoteMicRuntime()
+        }
+      }, 3_500)
+    }
+
     function insertQuickText(text) {
       if (typeof text !== 'string' || text === '') return
       const insertion = remoteMicRuntime.insertion
@@ -137,7 +148,7 @@ window.__ModuleLoader__.load({
         const language = catalog?.selection?.language ?? 'auto'
         if (providerId === 'sensevoice-hant') providerId = 'sensevoice-local'
         const transcript = await unwrap(speechNamespace.transcribe({ audioBase64: audioBase64(bytes), providerId, language }, new AbortController().signal))
-        const converted = await convertTranscriptText(transcript.text)
+        const converted = cleanTranscript(await convertTranscriptText(transcript.text))
         if (hotkeyRuntime.copyMode) await navigator.clipboard.writeText(converted)
         else insertQuickText(converted)
       } catch { /* quiet for hotkey recordings */ }
@@ -150,6 +161,21 @@ window.__ModuleLoader__.load({
      * Second step after recognition: ask the host to convert finished text to
      * Traditional Chinese with the current (panel-editable) settings.
      */
+    /**
+     * Trim dictation noise: trailing periods/comma/space, repeated sentence
+     * stops, and runs of spaces. Fragmented recordings otherwise leave a trail
+     * of `。 ` between inserts.
+     */
+    function cleanTranscript(text) {
+      if (typeof text !== 'string') return ''
+      return text
+        .replace(/^[\s\u3000]+/u, '')
+        .replace(/[\s\u3000]+$/u, '')
+        .replace(/[\s\u3000]*[。．.！!？?；;、,，…]+[\s\u3000]*$/u, '')
+        .replace(/([。！？!?])[。！？!?]+/gu, '$1')
+        .replace(/[ \t]+/gu, ' ')
+    }
+
     async function convertTranscriptText(text) {
       if (typeof text !== 'string' || text === '') return text ?? ''
       try {
@@ -212,6 +238,7 @@ window.__ModuleLoader__.load({
       timer: 0,
       refs: 0,
       seq: 0,
+      notice: null,
       stream: null,
       transport: 'connecting',
       selection: null,
@@ -240,6 +267,12 @@ window.__ModuleLoader__.load({
       if (Number.isFinite(status?.seq)) remoteMicRuntime.seq = status.seq
       const previousPhase = remoteMicRuntime.status?.phase ?? null
       const previousSeq = remoteMicRuntime.status?.seq ?? null
+      // A poll tick that returns the same state must not re-render the UI: at
+      // 150 ms cadence that alone kept the renderer at ~20–40% CPU.
+      if (remoteMicRuntime.seeded && previousSeq !== null && previousSeq === (status?.seq ?? null)
+        && previousPhase === (status?.phase ?? null)) {
+        return
+      }
       remoteMicRuntime.status = status ?? null
       if (previousPhase !== (status?.phase ?? null) || previousSeq !== (status?.seq ?? null)) {
         void fetchJson('/stt-hant/telemetry', {
@@ -265,13 +298,30 @@ window.__ModuleLoader__.load({
       if (remoteMicRuntime.seen.has(transcript.id)) return
       remoteMicRuntime.seen.add(transcript.id)
       if (transcript.error) {
-        notifyRemoteMicRuntime()
+        setRemoteMicNotice(`辨識失敗：${transcript.error}`)
+        void fetchJson('/stt-hant/telemetry', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ event: 'transcript-error', message: transcript.error, at: Date.now() }),
+        }).catch(() => {})
         return
       }
+      if (typeof transcript.text !== 'string' || transcript.text === '') {
+        setRemoteMicNotice('冇辨識到文字（太短或太大聲）')
+        void fetchJson('/stt-hant/telemetry', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ event: 'empty-transcript', id: transcript.id, at: Date.now() }),
+        }).catch(() => {})
+      }
       const timings = transcript.timings ?? {}
+      const cleaned = cleanTranscript(transcript.text)
+      if (cleaned === '' && typeof transcript.text === 'string') {
+        setRemoteMicNotice('冇辨識到文字（太短或太大聲）')
+      }
       const result = {
-        hant: typeof transcript.text === 'string' ? transcript.text : '',
-        raw: typeof transcript.raw === 'string' ? transcript.raw : '',
+        hant: cleaned,
+        raw: cleanTranscript(transcript.raw),
         audioSeconds: transcript.audioSeconds ?? 0,
         inferenceSeconds: transcript.inferenceSeconds ?? 0,
         round: (timings.totalMs ?? 0) / 1000,
@@ -324,11 +374,12 @@ window.__ModuleLoader__.load({
         notifyRemoteMicRuntime()
       }
       if (!remoteMicRuntime.polling) return
-      // Poll cheaply as a safety net even when the event stream is connected:
-      // fast while the button is held, calm when idle.
-      // Poll fast enough that the composer indicator reflects the remote's real
-      // state within ~150 ms (SSE has proven unreliable in this shell).
-      const delay = remoteMicRuntime.unavailable ? 2_000 : 150
+      // Fast while the voice key is held, calm when the helper is idle.
+      const phase = remoteMicRuntime.status?.phase
+      const delay = remoteMicRuntime.unavailable ? 3_000
+        : phase === 'recording' ? 120
+          : phase === 'ready' || phase === 'starting' || phase === 'provisioning' || phase === 'reconnecting' ? 400
+            : 1_500
       remoteMicRuntime.timer = window.setTimeout(remoteMicTick, delay)
     }
 
@@ -1587,7 +1638,8 @@ window.__ModuleLoader__.load({
           style: { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px' },
           onClick: () => { openSpeechPanel() },
         }, h(Dot, { tone }), h('span', { style: { fontSize: 11 } },
-          phase === 'recording' ? say('remoteVoice.recording') : `${say('remoteVoice.short')}：${stateText}`)),
+          remoteMicRuntime.notice
+            ?? (phase === 'recording' ? say('remoteVoice.recording') : `${say('remoteVoice.short')}：${stateText}`))),
       )
     }
 
@@ -1800,11 +1852,11 @@ window.__ModuleLoader__.load({
             run.abort.signal,
           ))
           // Step two: the settings-driven Simplified -> Traditional conversion.
-          const converted = await convertTranscriptText(transcript.text)
+          const converted = cleanTranscript(await convertTranscriptText(transcript.text))
           const roundSeconds = (performance.now() - started) / 1000
           if (token !== generation.current) return
           setHantText(converted)
-          setRawText(transcript.text)
+          setRawText(cleanTranscript(transcript.text))
           setTiming({ audio: transcript.audioSeconds, inference: transcript.inferenceSeconds, round: roundSeconds })
           const url = window.URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }))
           if (audioUrlRef.current) window.URL.revokeObjectURL(audioUrlRef.current)

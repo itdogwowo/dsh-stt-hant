@@ -14,3 +14,8 @@
     dataRoot: !!js dshHomePath('speech-to-text', 'sensevoice')
     idleTimeoutMs: 0
     threads: 6
+    # Short push-to-talk clips were being dropped by VAD (37/342 empty).
+    vadThreshold: 0.4
+    minSpeechSeconds: 0.15
+    minSilenceSeconds: 0.3
+    vadOnsetPaddingSeconds: 0.5
