@@ -1,0 +1,16 @@
+# The host half. The client half (sidebar console) loads from the same package
+# through the `dsh.client` section of package.json.
+- insert:
+    - id: stt-hant
+      name: 'dsh-stt-hant'
+      config: {}
+# Keep the shipped local recognizer warm: with idleTimeoutMs 0 the worker is
+# never stopped between recordings, so a remote-mic utterance goes straight to
+# inference instead of paying a model wake-up. The row belongs to the
+# voice-input bundle; this patch restates its complete config (dataRoot is
+# required). A user patch layer still wins over this one.
+- id: speech-to-text-sensevoice
+  config:
+    dataRoot: !!js dshHomePath('speech-to-text', 'sensevoice')
+    idleTimeoutMs: 0
+    threads: 6

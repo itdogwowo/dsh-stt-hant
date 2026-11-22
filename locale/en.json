@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Voice Input",
+    "description": "Speech input from a microphone or the Bluetooth remote: local SenseVoice recognition with optional Traditional conversion; keyboard shortcuts planned.",
+    "detail": "docs/DETAIL.md"
+  }
+}

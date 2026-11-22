@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "語音輸入",
+    "description": "用麥克風或藍牙遙控器做語音輸入：本機 SenseVoice 辨識、可選繁體轉換；日後亦可用鍵盤快捷鍵操作。",
+    "detail": "docs/DETAIL.md"
+  }
+}
