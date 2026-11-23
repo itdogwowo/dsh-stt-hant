@@ -698,6 +698,12 @@ export function apply(ctx, config) {
       ? bridge.subscribe(() => { if (bridge.status().phase === 'ready') model.prepare() })
       : () => {}
     scope.effect(() => () => { unsubscribeWarm(); bridge.dispose() }, 'dsh-stt-hant: remote mic helper')
+    // Belt and braces for a host that exits without unloading the plugin: the
+    // helper holds the remote's BLE link, so it must not outlive the host. The
+    // pid file covers the case where even this hook does not run.
+    const stopHelperOnExit = () => { try { bridge.stop() } catch { /* already gone */ } }
+    process.once('exit', stopHelperOnExit)
+    scope.effect(() => () => { process.off('exit', stopHelperOnExit) }, 'dsh-stt-hant: helper exit hook')
     const sseTrace = (entry) => {
       void appendFile(join(cacheDir, 'sse.log'), `${JSON.stringify({ at: Date.now(), ...entry })}\n`).catch(() => {})
     }

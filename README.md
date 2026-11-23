@@ -66,6 +66,13 @@ list. The plugin therefore ships a small native helper per platform:
   **no application is installed**, no BlackHole, no login item, no daemon.
 - The helper connects to the remote, speaks ATVV, decodes the 16 kHz IMA/DVI
   ADPCM stream, and writes one WAV per hold-to-talk utterance.
+- **It never outlives the host.** "Stop" in the card closes the helper's stdin
+  (its normal shutdown path), then sends SIGTERM and SIGKILL three seconds later
+  if it is still running; the host's exit hook does the same on a clean
+  shutdown. The helper's pid is written to `<cache>/helper.pid`, so if the host
+  is killed outright the next launch finds the leftover, confirms its owner is
+  gone, and takes it down before spawning a new one. A helper owned by a still
+  running host is left alone, so two DSH instances never fight over the remote.
 - The remote is bound **manually**: pair it in the OS Bluetooth settings first,
   then scan and bind it under "Remote binding" in the console (only the RC003
   identity is listed; other models come later).

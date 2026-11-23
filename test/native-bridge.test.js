@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile as execFileProcess, spawn as spawnProcess } from 'node:child_process'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, stat, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -271,6 +271,93 @@ test('the Windows backend spawns the compiled helper', async () => {
     await waitFor(() => bridge.status().phase === 'idle')
   } finally {
     bridge.dispose()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+/** Is this pid still running? The same test the bridge uses. */
+const alive = (pid) => {
+  try { process.kill(pid, 0); return true } catch { return false }
+}
+
+/** A real process that stays alive until it is killed. */
+const spawnLongLived = () => spawnProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+
+/** A pid that is certainly free: spawn a child and wait for it to exit. */
+const deadPid = async () => {
+  const child = spawnProcess(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'ignore' })
+  const pid = child.pid
+  await new Promise((resolve) => child.once('exit', resolve))
+  return pid
+}
+
+/** Create a bridge that never spawns anything; only its startup hook runs. */
+const createIdleBridge = (dir) => createRemoteMicBridge({
+  platform: 'win32',
+  cacheDir: dir,
+  spoolDir: join(dir, 'utterances'),
+  provision: async () => 'helper-not-used',
+  spawn: nodeSpawn('helper-not-used'),
+  execFile: nodeExecFile('helper-not-used'),
+})
+
+test('the helper pid file is written on start and removed when the helper exits', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-stt-hant-lock-'))
+  const helper = await createFakeHelper(dir)
+  const bridge = createRemoteMicBridge({
+    platform: 'win32',
+    cacheDir: dir,
+    spoolDir: join(dir, 'utterances'),
+    provision: async () => helper,
+    spawn: nodeSpawn(helper),
+    execFile: nodeExecFile(helper),
+  })
+  try {
+    await bridge.bind({ serial: 'SN1', vendorId: 10007, productId: 12984 })
+    await bridge.start()
+    await waitFor(() => bridge.status().phase === 'ready')
+    const lock = JSON.parse(await readFile(join(dir, 'helper.pid'), 'utf8'))
+    assert.equal(lock.hostPid, process.pid)
+    assert.ok(Number.isInteger(lock.pid) && lock.pid > 0)
+    bridge.stop()
+    await waitFor(() => !alive(lock.pid))
+    await waitFor(() => stat(join(dir, 'helper.pid')).then(() => false, () => true))
+  } finally {
+    bridge.dispose()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a helper left behind by a dead host is killed when the plugin loads', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-stt-hant-orphan-'))
+  const orphan = spawnLongLived()
+  const gone = await deadPid()
+  await writeFile(join(dir, 'helper.pid'), JSON.stringify({ pid: orphan.pid, hostPid: gone, at: Date.now() }))
+  let bridge
+  try {
+    bridge = createIdleBridge(dir)
+    await waitFor(() => !alive(orphan.pid))
+    await waitFor(() => stat(join(dir, 'helper.pid')).then(() => false, () => true))
+  } finally {
+    try { orphan.kill('SIGKILL') } catch { /* already gone */ }
+    bridge?.dispose()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a helper owned by a live host is left alone', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-stt-hant-live-'))
+  const owned = spawnLongLived()
+  await writeFile(join(dir, 'helper.pid'), JSON.stringify({ pid: owned.pid, hostPid: process.pid, at: Date.now() }))
+  let bridge
+  try {
+    bridge = createIdleBridge(dir)
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    assert.equal(alive(owned.pid), true)
+    assert.equal(await stat(join(dir, 'helper.pid')).then(() => true, () => false), true)
+  } finally {
+    try { owned.kill('SIGKILL') } catch { /* already gone */ }
+    bridge?.dispose()
     await rm(dir, { recursive: true, force: true })
   }
 })

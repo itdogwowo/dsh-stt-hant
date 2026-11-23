@@ -279,3 +279,27 @@ DSH 在 Windows 用低完整性（AppContainer／Low IL）沙箱執行外掛 spa
 7. 診斷資訊（`gatt discovery (...)`、`notify audio=...`）走 stderr，宿主會把它併進 `lastLog`；
    排查時先看 `/stt-hant/remote-mic/status` 的 `lastLog`，比猜快。
 
+## 2026-11-23：宿主被殺掉後 helper 變成孤兒，兩個 helper 搶同一顆遙控器
+
+**症狀**
+
+- 遙控器突然「不能用」：按鍵不再控制盒子，面板卻一直顯示重連。關掉插件後才恢復。
+- 或重啟 DSH 後遙控器時好時壞，`status.log` 裡連線與斷線交錯。
+
+**根因**
+
+helper 是宿主 spawn 的子程序，正常情況會跟著宿主一起結束（宿主關掉它的 stdin，helper 把 EOF 當關機指令）。
+但宿主被強制殺掉（當機、工作管理員結束、筆電強制關機）時，helper 可能還在一個 GATT 呼叫裡，
+最長會多活十幾秒；如果宿主很快重啟，新舊兩個 helper 會同時連同一顆遙控器，互相把對方踢掉。
+遙控器的 BLE 連結被兩邊輪流搶，它的 HID 按鍵就跟著失效。
+
+**規則**
+
+1. **用 pid 檔**：spawn 後把 `{ pid, hostPid }` 寫進 `<cache>/helper.pid`，exit 時刪掉。
+2. **啟動時清理**：插件載入時（以及每次 spawn 前）讀 pid 檔——原宿主還活著就**不要動**（那是另一個 DSH 實例的），
+   原宿主不在了才殺掉殘留的 helper（SIGTERM，等兩秒，再 SIGKILL）。
+3. **關閉要三段式**：關 stdin（helper 的正常關機路徑）→ SIGTERM → 三秒後 SIGKILL；
+   宿主另加 `process.once('exit')` 鉤子，正常退出時也帶走 helper。
+4. **不要假設 stdin 一定關得掉**：helper 若卡在 GATT 呼叫裡，EOF 要等它回到事件迴圈才處理得到，
+   所以宿主端一定要有 SIGTERM／SIGKILL 的後手，不能只靠 stdin。
+

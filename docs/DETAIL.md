@@ -88,7 +88,7 @@ RC003 有麥克風，但**它不是作業系統的音訊端點**，所以面板�
    - Windows：系統內建 `csc.exe`（.NET Framework 4.x）＋ Windows SDK 的合併 WinRT 中繼資料 `Windows.winmd` → `%USERPROFILE%\.dsh\cache\dsh-stt-hant\native\<source-hash>\atvv-capture.exe`。
    不是安裝 App、不寫 `/Applications`、不加登入項目、不改系統音訊設定。
 3. **想避開執行時編譯**：把事先編好的 `atvv-capture.exe` 放在 `native/`（或設定 `DSH_STT_HANT_HELPER` 指向它），宿主會直接 spawn，不再編譯。`native/build.ps1` 就是手動編譯用的腳本。
-4. 之後每次啟用只 spawn 這個 binary；插件停用或 DSH 退出時自動停止（`ctx.effect` 清理）。
+4. 之後每次啟用只 spawn 這個 binary；插件停用或 DSH 退出時自動停止（`ctx.effect` 清理）。停止是三段式：先關 helper 的 stdin（它把 EOF 當正常關機，會先關麥克風再退出），再送 SIGTERM，三秒後還在就 SIGKILL；宿主正常退出時另有一個 `process.once('exit')` 鉤子做同樣的事。helper 的 pid 會寫進 `<cache>/helper.pid`，所以**就算宿主被強制殺掉**，下次啟動的外掛會讀到這個檔案、確認原宿主已經不在、先殺掉殘留的 helper 再 spawn 新的；若原宿主還活著就不動它，避免兩個 DSH 實例互搶同一顆遙控器。
 5. 每次按住遙控器語音鍵：helper 收到 `STREAM_START`（HTT）→ 緩衝音訊 → 放開收到 `STREAM_STOP` → 寫一個 `utt-*.wav`（宿主沙箱擋寫檔時改由宿主寫入內嵌的 base64 WAV）。宿主一收到 `voice-stop` 就自己讀檔、辨識、轉換，再把結果經 SSE 推送給面板與對話框；面板同時保留 1.5 秒輪詢作備援，事件流斷線時仍會更新。
 6. 面板上的「遙控器麥克風（ATVV）」卡提供啟用／停止與狀態（編譯中／連線／收音／重連／錯誤）；第一次啟用可能需要你允許一次藍牙權限（macOS 是藍牙授權；Windows 只要遙控器已在「設定 → 藍牙與裝置」配對即可）。
 7. **不用開面板也會出字**：對話框左側會多一個小控制；插件在背景維持同一條事件流，收到新的遙控器錄音就自動辨識，並用 `inputActions.insertText()` 把文字插進目前草稿。插入失敗（例如草稿被改動）會退回剪貼簿，面板仍會保留結果。
