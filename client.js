@@ -22,7 +22,7 @@ window.__ModuleLoader__.load({
     /** Sidebar entry id; doubles as the keyed `main` panel key. */
     const PANEL_ID = 'stt-hant'
     /** Shown in the panel footer so a stale client bundle is obvious. */
-    const PLUGIN_VERSION = '0.11.2'
+    const PLUGIN_VERSION = '0.12.0'
     /** Conversion variants the panel may switch between. */
     const CONVERT_VARIANTS = ['s2hk', 's2twp', 's2tw', 's2t']
     const KEY_NAMES = {
@@ -574,8 +574,8 @@ window.__ModuleLoader__.load({
       'remote.triggered': '遙控器已觸發',
       'remote.bound': '已綁定這個按鍵',
       'remote.conflict': '兩列綁了同一個鍵：「開始／停止」會優先。',
-      'remote.media': '音量、播放這類多媒體鍵會被 macOS 先截走，網頁收不到；遇到這種鍵請改綁其他按鈕。',
-      'remote.bridge': '要錄「遙控器自己的麥克風」，先用 open-voice-bridge + BlackHole 把 ATVV 音訊接成系統輸入（見 docs/DETAIL.md），再在麥克風選 BlackHole。',
+      'remote.media': '音量、播放這類多媒體鍵常被系統先截走，網頁收不到；遇到這種鍵請改綁其他按鈕。',
+      'remote.bridge': '要錄「遙控器自己的麥克風」，macOS 可先用 open-voice-bridge + BlackHole 把 ATVV 音訊接成系統輸入（見 docs/DETAIL.md），再在麥克風選 BlackHole；Windows 直接用上方的「遙控器麥克風」。',
       'remote.hold': '按住說話（放開停止）',
       'remote.holdHint': '關閉時是切換：按一下開始、再按一下停止。若遙控器只送按下不送放開，請保持關閉。',
 
@@ -585,8 +585,11 @@ window.__ModuleLoader__.load({
       'remoteVoice.recording': '遙控器麥克風：收音中',
       'remoteVoice.error': '遙控器麥克風：錯誤',
       'remoteVoice.unavailable': '遙控器麥克風：不可用',
+      'remoteVoice.noRemote': '語音轉繁體：未綁定遙控器（點擊開啟面板）',
+      'remoteVoice.noRemoteShort': '語音轉繁體',
+      'remoteMic.noRemote': '沒有遙控器也可以用：① 在「識別服務」選 SenseVoice（繁體），內建語音輸入就輸出繁體；② 用下面的「鍵盤快捷鍵」按住說話；③ 用「測試錄音」卡直接測試整條流程。',
       'binding.title': '遙控器綁定',
-      'binding.hint': '先在 macOS 藍牙設定配對遙控器，然後在這裡綁定；綁定後才會啟用遙控器麥克風與按鍵功能。',
+      'binding.hint': '先在系統藍牙設定配對遙控器（macOS：系統設定 → 藍牙；Windows：設定 → 藍牙與裝置），然後在這裡綁定；綁定後才會啟用遙控器麥克風與按鍵功能。',
       'binding.scan': '掃描已配對的遙控器',
       'binding.scanning': '掃描中…',
       'binding.bind': '綁定',
@@ -596,20 +599,19 @@ window.__ModuleLoader__.load({
       'binding.pro2Only': '暫時只支援「小米藍牙語音遙控器 2 Pro」（RC003），其他型號稍後支援。',
       'remoteMic.notBound': '尚未綁定遙控器：先在上面的「遙控器綁定」完成綁定。',
       'remoteMic.title': '遙控器麥克風（ATVV）',
-      'remoteMic.hint': '不裝任何 App：插件第一次使用時用系統內建的 Swift 編譯一支小幫手，直接從遙控器收音，按住語音鍵講、放開就出結果。',
+      'remoteMic.hint': '不裝任何 App：插件第一次使用時用系統內建工具鏈編譯一支小幫手（macOS 用 Swift，Windows 用 csc），直接從遙控器收音，按住語音鍵講、放開就出結果。',
       'remoteMic.enable': '啟用',
       'remoteMic.disable': '停止',
       'remoteMic.idle': '未啟動',
-      'remoteMic.provisioning': '首次使用：正在用系統 Swift 編譯小幫手（約 10–30 秒）…',
+      'remoteMic.provisioning': '首次使用：正在用系統內建工具鏈編譯小幫手（約 10–30 秒）…',
       'remoteMic.starting': '正在啟動…',
       'remoteMic.ready': '已連線：{device}',
       'remoteMic.recording': '正在收音…',
       'remoteMic.reconnecting': '連線中斷，正在重連…',
       'remoteMic.error': '錯誤：{message}',
-      'remoteMic.planned': 'Windows 版的遙控器麥克風尚未實作；請先用系統麥克風。',
       'remoteMic.unsupported': '此平台不支援遙控器麥克風；請先用系統麥克風。',
       'remoteMic.unavailable': '這個宿主沒有遙控器麥克風路由（可能未重新載入 DSH）。',
-      'remoteMic.how': '用法：系統藍牙先連好遙控器 → 啟用 → 按住遙控器語音鍵講話 → 放開。macOS 可能要求一次藍牙權限。',
+      'remoteMic.how': '用法：系統藍牙先連好遙控器 → 啟用 → 按住遙控器語音鍵講話 → 放開。macOS 可能要求一次藍牙權限；Windows 需先在「設定 → 藍牙與裝置」配對。',
       'remoteMic.empty': '已連線，等待你按住語音鍵…',
       'remoteMic.done': '遙控器收音完成（{seconds} 秒）',
       'remoteMic.model': '模型：{phase}',
@@ -799,8 +801,8 @@ window.__ModuleLoader__.load({
       'remote.triggered': 'Remote triggered',
       'remote.bound': 'Key bound',
       'remote.conflict': 'Both rows are bound to the same key; “Start and stop” wins.',
-      'remote.media': 'Media keys such as volume and play are consumed by macOS before the page sees them; bind a different button instead.',
-      'remote.bridge': 'To record the remote’s own microphone, bridge ATVV into a system input first (open-voice-bridge + BlackHole; see docs/DETAIL.md), then pick BlackHole as the microphone.',
+      'remote.media': 'Media keys such as volume and play are often consumed by the system before the page sees them; bind a different button instead.',
+      'remote.bridge': 'To record the remote’s own microphone on macOS, bridge ATVV into a system input first (open-voice-bridge + BlackHole; see docs/DETAIL.md), then pick BlackHole as the microphone. On Windows, use the “Remote microphone” card above.',
       'remote.hold': 'Push to talk (release to stop)',
       'remote.holdHint': 'Off means toggle: press once to start, again to stop. If the remote only sends key-down without key-up, keep it off.',
 
@@ -810,31 +812,33 @@ window.__ModuleLoader__.load({
       'remoteVoice.recording': 'Remote microphone: recording',
       'remoteVoice.error': 'Remote microphone: error',
       'remoteVoice.unavailable': 'Remote microphone: unavailable',
+      'remoteVoice.noRemote': 'Traditional Chinese voice: no remote bound (click to open the console)',
+      'remoteVoice.noRemoteShort': 'Traditional voice',
+      'remoteMic.noRemote': 'No remote? You can still use this plugin: (1) pick SenseVoice（繁體） under “Recognizers” and the built-in voice input returns Traditional Chinese; (2) hold the “Keyboard shortcut” below to talk; (3) use the “Test recording” card to try the whole chain.',
       'binding.title': 'Remote binding',
-      'binding.hint': 'Pair the remote in macOS Bluetooth first, then bind it here. The remote microphone and remote keys stay disabled until a device is bound.',
+      'binding.hint': 'Pair the remote in the system Bluetooth settings first (macOS: System Settings → Bluetooth; Windows: Settings → Bluetooth & devices), then bind it here. The remote microphone and remote keys stay disabled until a device is bound.',
       'binding.scan': 'Scan paired remotes',
       'binding.scanning': 'Scanning…',
       'binding.bind': 'Bind',
       'binding.unbind': 'Unbind',
       'binding.bound': 'Bound: {name} ({serial})',
-      'binding.empty': 'No remote found: connect “Xiaomi Bluetooth Voice Remote” in macOS Bluetooth, then scan again.',
+      'binding.empty': 'No remote found: connect “Xiaomi Bluetooth Voice Remote” in the system Bluetooth settings, then scan again.',
       'binding.pro2Only': 'Only the Xiaomi Bluetooth Voice Remote 2 Pro (RC003) is supported for now; other models come later.',
       'remoteMic.notBound': 'No remote is bound yet: bind one under “Remote binding” above.',
       'remoteMic.title': 'Remote microphone (ATVV)',
-      'remoteMic.hint': 'No app to install: on first use the plugin compiles a small helper with the system Swift toolchain and records from the remote itself. Hold the voice key, speak, release.',
+      'remoteMic.hint': 'No app to install: on first use the plugin compiles a small helper with the built-in toolchain (Swift on macOS, csc on Windows) and records from the remote itself. Hold the voice key, speak, release.',
       'remoteMic.enable': 'Enable',
       'remoteMic.disable': 'Stop',
       'remoteMic.idle': 'Not started',
-      'remoteMic.provisioning': 'First use: compiling the helper with the system Swift toolchain (about 10–30 s)…',
+      'remoteMic.provisioning': 'First use: compiling the helper with the built-in toolchain (about 10–30 s)…',
       'remoteMic.starting': 'Starting…',
       'remoteMic.ready': 'Connected: {device}',
       'remoteMic.recording': 'Recording…',
       'remoteMic.reconnecting': 'Connection lost, reconnecting…',
       'remoteMic.error': 'Error: {message}',
-      'remoteMic.planned': 'The Windows remote-microphone backend is not implemented yet; use the system microphone for now.',
       'remoteMic.unsupported': 'This platform does not support the remote microphone; use the system microphone for now.',
       'remoteMic.unavailable': 'This host exposes no remote-microphone route (DSH may not have been reloaded).',
-      'remoteMic.how': 'Connect the remote in macOS Bluetooth first, then enable, then hold the remote voice key and speak. macOS may ask for Bluetooth permission once.',
+      'remoteMic.how': 'Connect the remote in the system Bluetooth settings first, then enable, then hold the remote voice key and speak. macOS may ask for Bluetooth permission once; Windows needs the device paired in Settings → Bluetooth & devices.',
       'remoteMic.empty': 'Connected; waiting for you to hold the voice key…',
       'remoteMic.done': 'Remote microphone utterance captured ({seconds} s)',
       'remoteMic.model': 'Model: {phase}',
@@ -1599,32 +1603,41 @@ window.__ModuleLoader__.load({
 
       const status = snapshot.status
       const phase = status?.phase ?? 'idle'
-      const tone = snapshot.unavailable || phase === 'error'
-        ? 'error'
-        : phase === 'ready'
-          ? 'success'
-          : phase === 'recording'
-            ? 'accent'
-            : phase === 'provisioning' || phase === 'starting' || phase === 'reconnecting'
-              ? 'warn'
-              : 'muted'
+      // A user without a remote still benefits from this plugin: the built-in
+      // voice input's Traditional provider, the keyboard shortcut and the test
+      // recorder. Once the host says no remote is bound, the control stops
+      // reporting a remote it does not have and simply opens the console.
+      const noRemote = status !== null && !status.binding
+      const tone = noRemote
+        ? 'muted'
+        : snapshot.unavailable || phase === 'error'
+          ? 'error'
+          : phase === 'ready'
+            ? 'success'
+            : phase === 'recording'
+              ? 'accent'
+              : phase === 'provisioning' || phase === 'starting' || phase === 'reconnecting'
+                ? 'warn'
+                : 'muted'
       const stateKey = snapshot.unavailable || phase === 'error' ? 'error'
         : phase === 'ready' ? 'ready'
           : phase === 'recording' ? 'recording'
             : phase === 'provisioning' || phase === 'starting' || phase === 'reconnecting' ? 'busy'
               : 'idle'
       const stateText = say(`remoteVoice.state.${stateKey === 'recording' ? 'busy' : stateKey}`)
-      const label = snapshot.unavailable
-        ? say('remoteVoice.unavailable')
-        : status === null
-          ? say('remoteVoice.idle')
-          : phase === 'recording'
-            ? say('remoteVoice.recording')
-            : phase === 'ready'
-              ? say('remoteVoice.ready')
-              : phase === 'error'
-                ? say('remoteVoice.error')
-                : say('remoteVoice.idle')
+      const label = noRemote
+        ? say('remoteVoice.noRemote')
+        : snapshot.unavailable
+          ? say('remoteVoice.unavailable')
+          : status === null
+            ? say('remoteVoice.idle')
+            : phase === 'recording'
+              ? say('remoteVoice.recording')
+              : phase === 'ready'
+                ? say('remoteVoice.ready')
+                : phase === 'error'
+                  ? say('remoteVoice.error')
+                  : say('remoteVoice.idle')
       // The composer lives outside the console panel, so it carries its own copy
       // of the stylesheet; two copies are inert and keep both surfaces styled.
       return h(React.Fragment, null,
@@ -1639,7 +1652,9 @@ window.__ModuleLoader__.load({
           onClick: () => { openSpeechPanel() },
         }, h(Dot, { tone }), h('span', { style: { fontSize: 11 } },
           remoteMicRuntime.notice
-            ?? (phase === 'recording' ? say('remoteVoice.recording') : `${say('remoteVoice.short')}：${stateText}`))),
+            ?? (noRemote
+              ? say('remoteVoice.noRemoteShort')
+              : phase === 'recording' ? say('remoteVoice.recording') : `${say('remoteVoice.short')}：${stateText}`))),
       )
     }
 
@@ -2841,8 +2856,6 @@ window.__ModuleLoader__.load({
       } else if (!remoteMic) {
         remoteMicText = say('panel.status.connecting')
         remoteMicTone = 'warn'
-      } else if (remoteMic.support === 'planned') {
-        remoteMicText = say('remoteMic.planned')
       } else if (remoteMic.support === 'unsupported') {
         remoteMicText = say('remoteMic.unsupported')
       } else {
@@ -2908,11 +2921,18 @@ window.__ModuleLoader__.load({
         !bound && remoteMicSupported
           ? h('p', { className: 'stt-note', 'data-tone': 'warn' }, say('remoteMic.notBound'))
           : null,
+        !bound && remoteMicSupported
+          ? h('p', { className: 'stt-note' }, say('remoteMic.noRemote'))
+          : null,
         remoteMicOn && bound && remoteMicSupported && remoteMicPhase === 'ready'
           ? h('p', { className: 'stt-note' }, say('remoteMic.empty'))
           : null,
-        remoteMicError && remoteMicPhase === 'error'
-          ? h('p', { className: 'stt-note', 'data-tone': 'error' }, remoteMicError)
+        // The helper retries by itself after a failure, so the last error would
+        // otherwise flash once and vanish while the panel just says "starting".
+        // Keep it visible during the retry loop: on Windows it is the sentence
+        // that tells the user to press a key and wake the remote.
+        remoteMicError && (remoteMicPhase === 'error' || remoteMicPhase === 'starting' || remoteMicPhase === 'reconnecting')
+          ? h('p', { className: 'stt-note', 'data-tone': remoteMicPhase === 'error' ? 'error' : 'warn' }, remoteMicError)
           : null,
       )
 
@@ -3011,7 +3031,9 @@ window.__ModuleLoader__.load({
             providersSection,
             conversionSection,
             hotkeySection,
-            keysSection,
+            // HID key capture is implemented by the macOS helper only; the
+            // Windows helper leaves the remote's keys to the OS.
+            remoteMic?.platform === 'darwin' ? keysSection : null,
             bindingSection,
             remoteMicSection,
             recorderSection,

@@ -124,8 +124,7 @@ provider.preparation?.subscribe(() => {})   // 假服務
 3. helper 由插件生命週期管理：`ctx.effect` 清理時停止；不要在系統裡留 launch agent / login item。
 4. 第一次啟用需要編譯（約 10–30 秒）與一次藍牙權限；失敗時面板要顯示可讀錯誤，不要靜默。
 5. 改宿主端（新增路由/manager）後要重啟 DSH 才生效；只改 `client.js` 重新載入頁面即可。
-6. 若日後要支援 Windows：`PLATFORM_SUPPORT.win32 = 'planned'` 的 slot 在 `lib/native-bridge.js`，
-   後端協議（JSON lines + WAV spool + 同組 HTTP 路由）保持不變，只加一個 helper 實作。
+6. Windows 版沿用同一套協議與 JSON 契約（`native/atvv-capture.cs`，WinRT GATT）：後端協議（JSON lines + WAV spool + 同一組 HTTP 路由）不變，只加一個同介面的 helper 實作。實作見 `lib/native-bridge.js` 的 `provisionWindows()`。
 
 **出處**
 
@@ -150,3 +149,127 @@ provider.preparation?.subscribe(() => {})   // 假服務
 2. 鎖檔的 mtime **早於目前宿主啟動時間** 就幾乎一定是崩潰殘留，可安全刪除：
    `rm ~/.dsh/profiles/desktop/package.json.lock`。
 3. 刪除後不要重跑安裝指令前先確認 DSH 本身沒有在寫入；宿主重啟後不會重建殘留鎖。
+
+## 2026-11-23：端點防護把「編譯並執行」當成惡意行為（Cortex XDR）
+
+**症狀**
+
+- 第一次啟用遙控器麥克風時，面板顯示編譯失敗或 spawn 失敗；端點防護告警：
+  `Behavioral Threat Protection / script_compile_and_run / Quarantined: True`，來源是 `DeepSeek Harness.exe`。
+
+**根因**
+
+- 插件在第一次啟用時用 `csc.exe` 編譯 `native/atvv-capture.cs`，然後立刻 spawn 產物。這正是 behavioral rule 的形狀（腳本編譯後執行）。
+
+**規則**
+
+1. 先試白名單：把插件 cache 目錄 `%USERPROFILE%\.dsh\cache\dsh-stt-hant`（或整個插件目錄）加入端點防護的排除。
+2. 不想改防護設定：事先手動編譯（`native/build.ps1`），把 `atvv-capture.exe` 放回 `native/`，或設定 `DSH_STT_HANT_HELPER` 指向它。`provisionWindows()` 會優先用預編譯檔，不再編譯。
+3. 錯誤訊息要能指向這兩條路，不要只丟「編譯失敗」。
+
+## 2026-11-23：csc 編譯 WinRT 需要 Windows SDK 的合併中繼資料
+
+**症狀**
+
+- `csc.exe` 編譯 `atvv-capture.cs` 出現 `CS0012: System.Attribute ... System.Runtime`、`CS1545: 語言不支援事件`，或 `add_ValueChanged` 找不到。
+
+**根因**
+
+- .NET Framework 的 WinRT 投影要三件事同時成立：
+  1. 參考**合併的** `Windows.winmd`（`C:\Program Files (x86)\Windows Kits\10\UnionMetadata\<ver>\Windows.winmd`），不是 `C:\Windows\System32\WinMetadata` 裡的分命名空間 `.winmd`——那組缺 `Windows` 契約組件，`IAsyncOperation` 會找不到。
+  2. 參考 `System.Runtime.dll`、`System.Runtime.InteropServices.WindowsRuntime.dll`、`System.Runtime.WindowsRuntime.dll`。
+  3. 原始碼是 UTF-8 無 BOM → 一定要 `/codepage:65001`，否則中文變亂碼。
+
+**規則**
+
+1. `provisionWindows()` 依序找 csc 與 `Windows.winmd`；找不到時錯誤訊息要說「裝 Windows SDK 或改用預編譯 exe」。
+2. 參考組齊全時，WinRT 事件可以用 `+=`（投影生效）；只缺 `System.Runtime.InteropServices.WindowsRuntime.dll` 時會退化成 `add_`／`remove_` 存取子。不要為此改寫程式碼，先把參考補齊。
+3. 沒有 Windows SDK 的機器：直接走預編譯 exe 路線。
+
+## 2026-11-23：Windows 檢出（`core.autocrlf=true`）讓依賴 LF 的測試失敗
+
+**症狀**
+
+- `test/client.test.js` 的「every stt- class is styled」在 Windows 上失敗：`assert.ok(cssMatch)` 收到 null；其他測試正常。
+
+**根因**
+
+- 測試用 `/\n/` 切 `client.js` 的樣式字串；Windows 檢出是 CRLF，`\n` 前多一個 `\r`，regex 不匹配。
+
+**規則**
+
+1. 測試裡需要匹配行尾時用 `\r?\n`。
+2. 不要假設 `git checkout` 的換行；CI 與本機可能不同。
+
+## 2026-11-23：測試用的假 helper 用 shebang，Windows 上 spawn 失敗（EFTYPE）
+
+**症狀**
+
+- `test/native-bridge.test.js` 在 Windows 上 `spawn` 直接 EFTYPE；macOS 正常。
+
+**根因**
+
+- 假 helper 是 `#!` 腳本 + `chmod`；Windows 沒有 shebang，`spawn` 不會自己找解譯器。
+
+**規則**
+
+- 測試裡用 `spawn`／`execFile` 注入 `node <script>` 包一層（`createFakeHelper` 回傳 script 路徑，`native-bridge.test.js` 的 `nodeSpawn`／`nodeExec`），不要依賴 shebang。
+
+## 2026-11-23：DSH 把外掛的子程序關進沙箱，helper 寫不進 cache（Windows）
+
+**症狀**
+
+- 遙控器連得上、按鍵事件（`control 00 02`、`voice-started`）都有進來，但每次放手都出現
+  `write-failed 無法寫入錄音檔：拒絕存取路徑 '...\cache\dsh-stt-hant\utterances\utt-*.wav'`。
+- `/stt-hant/remote-mic/status` 的 `phase` 卡在 `error`，`utterances` 永遠是空的。
+
+**根因**
+
+DSH 在 Windows 用低完整性（AppContainer／Low IL）沙箱執行外掛 spawn 的子程序：
+`DeepSeek Harness.exe` 是 Medium，它 spawn 的 `atvv-capture.exe` 是 Low（`TokenIntegrityLevel` 0x1000）。
+`%USERPROFILE%\.dsh\cache\...` 是 Medium 標籤的目錄，Low 程序寫不進去——即使 ACL 寫著 FullControl 也一樣，
+因為那是完整性層級（mandatory integrity）而不是 ACL 在擋。沙箱另外給每個子程序一個 `%TEMP%\dsh-subprocess-*`，
+但 helper 拿到的是繼承來的 TEMP，不是那個目錄。
+
+**規則**
+
+1. 不要假設外掛 spawn 的子程序能寫 `~/.dsh`。helper 寫檔失敗時，把整份 WAV 以 base64 內嵌在
+   `voice-stop` 事件裡（`{"event":"voice-stop","name":"utt-*.wav","wav":"<base64>"}`），由宿主寫進自己的 spool。
+   宿主是 Medium，寫得進去；契約仍然是同一條 JSON lines 通道。
+2. `Directory.CreateDirectory(outDir)` 也要包 try/catch：沙箱下它同樣會失敗，不能讓 helper 在啟動時就掛掉。
+3. 排查方法：`Get-Process atvv-capture` 看有沒有 helper，再查它的 token 完整性；或直接看
+   `~/.dsh/cache/dsh-stt-hant/status.log` 的 `write-failed`。沙箱的證據是「同一個路徑，宿主寫得進去、helper 寫不進去」。
+4. 這個沙箱不是使用者設定的，是 DSH 的執行環境；不要叫使用者關掉沙箱，讓外掛自己適應。
+
+## 2026-11-23：Windows GATT 快取讓 ATVV 服務「少了特徵」，遙控器睡著時只回 Unreachable
+
+**症狀**
+
+- 第一次成功收音之後，helper 陷入 `reconnecting → connecting → error` 迴圈，
+  `status.log` 出現 600 多次 `error atvv-incomplete ATVV 服務缺少必要特徵。`，久久才成功一次。
+- 換成新 exe 之後仍然失敗，但診斷行換了：`gatt discovery (Uncached) failed: gatt failed: Unreachable`
+  與 `notify audio=Unreachable / Unreachable`。
+
+**根因（兩件事，先分開看）**
+
+1. **快取表可能不完整。** Windows 會把每台裝置的 GATT 表存在 OS 裡。韌體換版、上次連線中斷、
+   或別台主機配對過，都可能留下一份「有 ATVV 服務、卻沒有三個特徵」的快取表。
+   `GetGattServicesAsync()` 預設走快取，於是服務找得到、特徵找不到 → `ATVV incomplete`，然後無限重連。
+2. **快取表可以「不連線」就讀到。** 這是同一個坑的另一半：先讀快取看起來成功（表是完整的），
+   但裝置其實沒有連上，接下來第一個 CCCD 寫入就回 `Unreachable`，而 `GET_CAPS` 的寫入會一直掛住不回來。
+   所以「先試快取、失敗再 uncached」的順序是錯的——它會把「表存在」誤判成「連線成功」。
+
+**規則**
+
+1. **先 Uncached 再 Cached。** 在 Windows 上 `GetGattServicesAsync(Uncached)` 才會真的建立 BLE 連線；
+   快取只當「連線已經在、表也還在」時的退路。兩次都失敗才回報錯誤（錯誤只由最後一次帶 `report` 的嘗試發出，避免重連時洗版）。
+2. **`Unreachable` 不等於程式壞了，通常是遙控器在睡覺。** BLE 週邊只在自己廣播時才連得上；
+   WinRT 不會替你喚醒它，只會回 `Unreachable`。所以失敗後改為監聽 `BluetoothLEAdvertisementWatcher`
+   （Active 模式、比對已綁定的位址），使用者一按鍵就立刻重連；每三次跳過仍強制嘗試一次連線，
+   以涵蓋「裝置醒著但已連線、不廣播」的情況。
+3. **錯誤訊息要說人話。** `Unreachable` 直接丟給使用者沒有意義；面板要說「遙控器沒有回應，按一下按鍵把它喚醒」。
+4. **`notify` 與 `GET_CAPS` 失敗要立刻拋。** 不拋的話 `WriteValueAsync` 會掛住，helper 看起來「活著但沒反應」，
+   上層只會看到一個永不結束的 `starting`。
+5. 診斷資訊（`gatt discovery (...)`、`notify audio=...`）走 stderr，宿主會把它併進 `lastLog`；
+   排查時先看 `/stt-hant/remote-mic/status` 的 `lastLog`，比猜快。
+

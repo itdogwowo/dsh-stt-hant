@@ -1,8 +1,9 @@
 /**
  * Host half of dsh-stt-hant: registers one more speech provider that returns
  * Traditional Chinese, delegating recognition to the shipped local model, and
- * (on macOS) manages the bundled ATVV capture helper that turns the remote's
- * own microphone into WAV utterances for the sidebar console.
+ * manages the bundled ATVV capture helper that turns the remote's own
+ * microphone into WAV utterances for the sidebar console. The helper is Swift
+ * on macOS and C# on Windows; the bridge picks the source per platform.
  *
  * No UI is created here. The speech UI that already lists providers picks this
  * entry up as soon as it is registered; the console talks to the remote-mic
@@ -10,7 +11,6 @@
  */
 import { appendFile, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { resolveVariant } from './lib/hant.js'
 import { createConvertSettings } from './lib/convert-settings.js'
 import { createHantProvider } from './lib/provider.js'
@@ -18,7 +18,7 @@ import { selfRejection } from './lib/http-fence.js'
 import { createRemoteMicBridge, defaultCacheDir } from './lib/native-bridge.js'
 
 /** Host-half version; the panel compares it to its own bundle version. */
-export const HOST_VERSION = '0.11.2'
+export const HOST_VERSION = '0.12.0'
 
 /** The speech service must exist before this plugin activates. */
 export const inject = ['speechToText']
@@ -201,13 +201,22 @@ export function registerRemoteMicRoutes(scope, bridge, warn, model, recognize, t
       try { res.write(': ping\n\n') } catch { /* client went away */ }
     }, 15_000)
     keepAlive.unref?.()
+    // A GET request's own stream is already complete when the handler runs, so
+    // `req.on('close')` fires within a millisecond of the handler starting. If
+    // the stream were tied to it, the response would be closed before the first
+    // state change and the client would only ever see the frame written on
+    // connect — the classic "sometimes it reacts, sometimes it waits" symptom.
+    // Only the response tells us when the reader actually goes away.
+    let cleaned = false
     const cleanup = () => {
+      if (cleaned) return
+      cleaned = true
       clearInterval(keepAlive)
       unsubscribe()
       trace({ event: 'sse-close' })
     }
-    req.on('close', cleanup)
     res.on('close', cleanup)
+    res.on('finish', cleanup)
     // The route framework closes a response when its handler resolves, so keep
     // the handler pending for the lifetime of the stream.
     await new Promise((resolve) => {
@@ -215,10 +224,11 @@ export function registerRemoteMicRoutes(scope, bridge, warn, model, recognize, t
       const finish = () => {
         if (settled) return
         settled = true
+        cleanup()
         resolve()
       }
-      req.on('close', finish)
       res.on('close', finish)
+      res.on('finish', finish)
     })
   })
 
@@ -271,10 +281,13 @@ export function registerRemoteMicRoutes(scope, bridge, warn, model, recognize, t
       }
       timer = setTimeout(finish, 15_000)
       timer.unref?.()
-      req.on('close', finish)
+      // Same trap as the event stream: a GET's request stream closes at once, so
+      // only the response reports a real disconnect.
+      res.on('close', finish)
+      res.on('finish', finish)
     })
     trace({ event: 'next-poll', since, seq: bridge.status().seq ?? 0, waitedMs: Date.now() - pollStart })
-    sendJson(res, 200, snapshot())
+    if (!res.writableEnded && !res.destroyed) sendJson(res, 200, snapshot())
   })
 
   route('exact', '/stt-hant/recognize', async (req, res) => {
@@ -562,7 +575,6 @@ export function apply(ctx, config) {
     trace('webServer injected')
     let bridge
     bridge = createRemoteMicBridge({
-      sourcePath: fileURLToPath(new URL('./native/atvv-capture.swift', import.meta.url)),
       log: (line) => warn(`[dsh-stt-hant] ${line}`),
       // Do not wait for the client to ask: the helper's release event starts
       // recognition here, so the text is ready before the UI even notices.

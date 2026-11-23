@@ -1,3 +1,17 @@
 node_modules/
 .DS_Store
 *.log
+
+# Local npm cache used when installing without network defaults.
+.npm-cache/
+
+# Scratch output from hand-testing the WinRT helper compile.
+.tmp-winrt-test/
+.tmp-probe/
+
+# Previous helper binary kept while the running one holds the file open.
+native/atvv-capture.exe.old
+
+# Compiled native helper: build it from native/atvv-capture.cs with
+# native/build.ps1 rather than committing the binary.
+native/atvv-capture.exe

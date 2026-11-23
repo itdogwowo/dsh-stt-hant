@@ -189,7 +189,9 @@ test('disposers returned by the registration effects are callable', () => {
 })
 
 test('every stt- class the components use is defined in the stylesheet', () => {
-  const cssMatch = source.match(/const CSS = `([\s\S]*?)`\n/)
+  // Tolerate CRLF: a Windows checkout (core.autocrlf=true) keeps the source's
+  // line endings, and the template literal still ends with a newline.
+  const cssMatch = source.match(/const CSS = `([\s\S]*?)`\r?\n/)
   assert.ok(cssMatch, 'the bundle carries a stylesheet')
   const css = cssMatch[1]
   const defined = new Set()

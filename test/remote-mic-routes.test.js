@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import { registerRemoteMicRoutes, HOST_VERSION } from '../index.js'
 
 /** Collect the routes a fake web server receives. */
@@ -165,4 +166,74 @@ test('recognize takes one utterance id and answers text plus timings', async () 
 
   const wrong = await call(route, { method: 'GET' })
   assert.equal(wrong.code, 405)
+})
+
+/** A request/response pair with EventEmitter semantics and frame capture. */
+function createStream() {
+  const request = new EventEmitter()
+  request.method = 'GET'
+  request.url = '/stt-hant/remote-mic/events'
+  request.headers = { host: '127.0.0.1:3080' }
+  request.resume = () => {}
+  request.destroy = () => {}
+
+  const frames = []
+  const response = new EventEmitter()
+  response.headersSent = false
+  response.writableEnded = false
+  response.destroyed = false
+  response.ended = false
+  response.writeHead = (code, headers) => { response.code = code; response.headers = headers; response.headersSent = true }
+  response.write = (chunk) => { frames.push(String(chunk)); return true }
+  response.end = () => { response.ended = true; response.writableEnded = true }
+  return { request, response, frames }
+}
+
+const delay = (ms) => new Promise((resolve) => { setTimeout(resolve, ms) })
+
+test('the event stream outlives the request and closes only with the response', async () => {
+  const { scope, routes } = createScope()
+  const listeners = new Set()
+  let seq = 0
+  let phase = 'ready'
+  const bridge = {
+    ...fakeBridge,
+    status: () => ({ platform: 'win32', support: 'supported', phase, seq, utterances: [] }),
+    subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+  }
+  registerRemoteMicRoutes(scope, bridge, () => {}, fakeModel, fakeRecognize)
+  const route = byPath(routes, '/events')
+
+  const { request, response, frames } = createStream()
+  let settled = false
+  const handled = route.handler(request, response).then(() => { settled = true })
+  await delay(20)
+
+  // The connect frame is written and the subscription is live.
+  assert.equal(response.code, 200)
+  assert.equal(response.headers['content-type'], 'text/event-stream; charset=utf-8')
+  assert.equal(frames.length, 1)
+  assert.equal(JSON.parse(frames[0].slice('data: '.length)).phase, 'ready')
+  assert.equal(listeners.size, 1)
+
+  // A GET request's stream is already complete: its close must not end the SSE.
+  request.emit('close')
+  await delay(20)
+  assert.equal(settled, false, 'handler must stay pending after the request closes')
+  assert.equal(response.ended, false, 'response must stay open after the request closes')
+  assert.equal(listeners.size, 1, 'subscription must survive the request close')
+
+  // A bridge change is pushed without any polling.
+  phase = 'recording'
+  seq = 1
+  for (const listener of [...listeners]) listener()
+  await delay(20)
+  assert.equal(frames.length, 2)
+  assert.equal(JSON.parse(frames[1].slice('data: '.length)).phase, 'recording')
+
+  // The reader going away releases the handler and the subscription.
+  response.emit('close')
+  await handled
+  assert.equal(settled, true)
+  assert.equal(listeners.size, 0)
 })
