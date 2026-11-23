@@ -2220,7 +2220,7 @@ window.__ModuleLoader__.load({
             body: JSON.stringify({ enabled }),
           })
           publishRemoteMicStatus(next)
-          setRemoteMicUnavailable(false)
+          setRemoteMicUnavailableState(false)
           setRemoteMicError('')
         } catch (error) {
           setRemoteMicError(errorText(error))

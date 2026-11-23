@@ -366,6 +366,7 @@ internal sealed class Capture
     private const int ScanTimeoutMs = 6000;
     private bool scanGate = false;
     private int scanSkips = 0;
+    private int consecutiveFailures = 0;
     // The in-box C# 5 compiler cannot project WinRT events as `+=`, so the
     // handlers are attached through the add_ accessors. Disposing the device
     // releases them; the handlers below are defensive because a callback can
@@ -433,13 +434,18 @@ internal sealed class Capture
             catch (Exception error)
             {
                 scanGate = true;
+                consecutiveFailures++;
                 Emit.Diag("session failed: " + error.Message);
                 Emit.Error("helper-failed", error.Message);
             }
             Cleanup();
             if (!running) break;
             Emit.State("reconnecting", "helper session ended");
-            await Task.Delay(2000);
+            // Back off instead of retrying every two seconds: a remote that is
+            // asleep or whose link keeps dropping should not be hammered, and a
+            // connect attempt itself costs a GATT timeout.
+            var backoff = Math.Min(2000 * (1 << Math.Min(consecutiveFailures - 1, 4)), 30000);
+            await Task.Delay(backoff);
         }
         await finished.Task;
     }
@@ -512,6 +518,7 @@ internal sealed class Capture
         device.ConnectionStatusChanged += OnConnectionStatusChanged;
         Emit.State("connecting", device.Name);
         await DiscoverAsync();
+        consecutiveFailures = 0;
 
         await Task.WhenAny(finished.Task, sessionDone.Task);
     }
@@ -559,9 +566,10 @@ internal sealed class Capture
      * change, an interrupted session, or another host having paired the remote —
      * leaves the ATVV service without its characteristics. The helper then
      * reported "ATVV incomplete" and reconnected forever, succeeding only when
-     * the OS eventually dropped the cache. Try the cache first because it is
-     * instant, then force an uncached rediscovery; only the uncached attempt
-     * reports errors, so a transient cache problem does not spam the panel.
+     * the OS eventually dropped the cache. The uncached request goes first
+     * because it is also what opens the link; the cached table is only a
+     * fallback. Only the last attempt reports an error to the panel, so a
+     * transient cache problem does not spam it.
      */
     private async Task DiscoverAsync()
     {
@@ -596,17 +604,19 @@ internal sealed class Capture
         command = null;
         audio = null;
         control = null;
-        var services = await device.GetGattServicesAsync(mode);
-        if (services.Status != GattCommunicationStatus.Success)
+        // Ask for the ATVV service by UUID instead of enumerating the whole
+        // table. A full enumeration hands back service objects from the cached
+        // table, and once that cache is stale their characteristic query answers
+        // AccessDenied with an empty list — the "ATVV 服務缺少必要特徵" loop.
+        // A UUID request also opens the link when it is uncached.
+        var found = await device.GetGattServicesForUuidAsync(AtvvProtocol.ServiceUuid, mode);
+        if (found.Status != GattCommunicationStatus.Success)
         {
-            if (report) Emit.Error("gatt-failed", "遙控器沒有回應（" + services.Status + "）。按一下遙控器上的按鍵把它喚醒，讓它重新開始廣播。");
-            throw new InvalidOperationException("gatt failed: " + services.Status);
+            if (report) Emit.Error("gatt-failed", "遙控器沒有回應（" + found.Status + "）。按一下遙控器上的按鍵把它喚醒，讓它重新開始廣播。");
+            throw new InvalidOperationException("gatt failed: " + found.Status);
         }
         GattDeviceService voice = null;
-        foreach (var service in services.Services)
-        {
-            if (service.Uuid == AtvvProtocol.ServiceUuid) { voice = service; break; }
-        }
+        foreach (var service in found.Services) { voice = service; break; }
         if (voice == null)
         {
             if (report) Emit.Error("no-atvv-service", "遙控器沒有提供 ATVV 語音服務（可能是不同型號）。");
@@ -622,25 +632,33 @@ internal sealed class Capture
         }
         if (command == null || audio == null || control == null)
         {
+            var seen = new StringBuilder();
+            foreach (var characteristic in characteristics.Characteristics) seen.Append(characteristic.Uuid).Append(' ');
+            Emit.Diag("atvv characteristics (" + mode + ", " + characteristics.Status + "): " + seen.ToString().Trim());
             if (report) Emit.Error("atvv-incomplete", "ATVV 服務缺少必要特徵。");
             throw new InvalidOperationException("ATVV incomplete");
         }
 
-        foreach (var service in services.Services)
+        try
         {
-            if (service.Uuid != AtvvProtocol.DeviceInfoUuid) continue;
-            var info = await service.GetCharacteristicsAsync(mode);
-            foreach (var characteristic in info.Characteristics)
+            var info = await device.GetGattServicesForUuidAsync(AtvvProtocol.DeviceInfoUuid, mode);
+            if (info.Status == GattCommunicationStatus.Success)
             {
-                if (characteristic.Uuid != AtvvProtocol.ModelNumberUuid) continue;
-                var read = await characteristic.ReadValueAsync(mode);
-                if (read.Status == GattCommunicationStatus.Success)
+                foreach (var service in info.Services)
                 {
-                    var reader = DataReader.FromBuffer(read.Value);
-                    model = reader.ReadString(reader.UnconsumedBufferLength).Trim();
+                    var read = await service.GetCharacteristicsAsync(mode);
+                    foreach (var characteristic in read.Characteristics)
+                    {
+                        if (characteristic.Uuid != AtvvProtocol.ModelNumberUuid) continue;
+                        var value = await characteristic.ReadValueAsync(mode);
+                        if (value.Status != GattCommunicationStatus.Success) continue;
+                        var reader = DataReader.FromBuffer(value.Value);
+                        model = reader.ReadString(reader.UnconsumedBufferLength).Trim();
+                    }
                 }
             }
         }
+        catch (Exception error) { Emit.Diag("model read skipped: " + error.Message); }
 
         var notify = GattClientCharacteristicConfigurationDescriptorValue.Notify;
         var audioStatus = await audio.WriteClientCharacteristicConfigurationDescriptorAsync(notify);

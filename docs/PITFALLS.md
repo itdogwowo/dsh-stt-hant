@@ -261,7 +261,7 @@ DSH 在 Windows 用低完整性（AppContainer／Low IL）沙箱執行外掛 spa
 
 **規則**
 
-1. **先 Uncached 再 Cached。** 在 Windows 上 `GetGattServicesAsync(Uncached)` 才會真的建立 BLE 連線；
+1. **先 Uncached 再 Cached。** 在 Windows 上 uncached 的 GATT 查詢才會真的建立 BLE 連線；
    快取只當「連線已經在、表也還在」時的退路。兩次都失敗才回報錯誤（錯誤只由最後一次帶 `report` 的嘗試發出，避免重連時洗版）。
 2. **`Unreachable` 不等於程式壞了，通常是遙控器在睡覺。** BLE 週邊只在自己廣播時才連得上；
    WinRT 不會替你喚醒它，只會回 `Unreachable`。所以失敗後改為監聽 `BluetoothLEAdvertisementWatcher`
@@ -270,6 +270,12 @@ DSH 在 Windows 用低完整性（AppContainer／Low IL）沙箱執行外掛 spa
 3. **錯誤訊息要說人話。** `Unreachable` 直接丟給使用者沒有意義；面板要說「遙控器沒有回應，按一下按鍵把它喚醒」。
 4. **`notify` 與 `GET_CAPS` 失敗要立刻拋。** 不拋的話 `WriteValueAsync` 會掛住，helper 看起來「活著但沒反應」，
    上層只會看到一個永不結束的 `starting`。
-5. 診斷資訊（`gatt discovery (...)`、`notify audio=...`）走 stderr，宿主會把它併進 `lastLog`；
+5. **用 UUID 直接要服務，不要列整張表。** 診斷行 `atvv characteristics (Cached, AccessDenied): `（特徵清單是空的）
+   才是真正的根因：從**整表列舉**拿到的 `GattDeviceService` 一旦快取過期，查它的特徵就回 `AccessDenied`。
+   改用 `GetGattServicesForUuidAsync(<ATVV UUID>, mode)` 直接要那個服務，特徵就正常回來；
+   同樣的寫法也用在 DeviceInfo（讀型號）上。這一條取代了「先 Uncached 再 Cached」的整表列舉。
+6. **重連要退避。** 睡著的裝置不會因為每兩秒敲一次就醒；連線嘗試本身要等一個 GATT 逾時（約 15 秒）。
+   連續失敗改成 2 → 4 → 8 → 16 → 30 秒退避，成功一次就歸零。
+7. 診斷資訊（`gatt discovery (...)`、`notify audio=...`）走 stderr，宿主會把它併進 `lastLog`；
    排查時先看 `/stt-hant/remote-mic/status` 的 `lastLog`，比猜快。
 
